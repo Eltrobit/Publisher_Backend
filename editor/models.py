@@ -1,5 +1,5 @@
 from django.db import models
-from auth.models import User
+from authentication.models import User
 
 
 class BinaryDocument(models.Model):
