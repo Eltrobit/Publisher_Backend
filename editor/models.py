@@ -1,3 +1,8 @@
 from django.db import models
+from auth.models import User
 
-# Create your models here.
+
+class BinaryDocument(models.Model):
+    user_id = models.ForeignKey(User, verbose_name='Пользователь', on_delete=models.CASCADE)
+    pdf_data = models.BinaryField()  # PDF хранится как бинарные данные
+
