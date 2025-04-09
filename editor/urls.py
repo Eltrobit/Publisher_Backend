@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import BinaryDocumentViewSet
+from .views import *
 
 urlpatterns = [
-    path('Binarylist/', BinaryDocumentViewSet.as_view(), name='BinaryDocument'),
+    path('api/binary', BinaryDocumentViewSet.as_view(), name='BinaryDocument')
 ]
