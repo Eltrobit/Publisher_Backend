@@ -1,91 +1,92 @@
-from django.utils import timezone
+from django.contrib.auth import authenticate, login, logout
 from rest_framework import status
-from Publisher_Backend.settings import SECRET_KEY
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .serializers import UserSerializer
 from .models import User
 from django.db.models import Q
-import datetime
-import jwt
-from django.conf import settings
 
 class SignUpView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
-        try:
-            serializer = UserSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = UserSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            # Автоматически авторизуем пользователя
+            login(request, user)
+            return Response({
+                'status': 'success',
+                'message': 'Registration successful',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'username': user.username
+                }
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class LoginView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
-        identifier = request.data['email']
-        password = request.data['password']
-
-        if not identifier or not password:
-            return Response({'error': 'Missing email/username or password'}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.filter(Q(email=identifier) | Q(username=identifier)).first()
-
+        email = request.data.get('email', '')
+        password = request.data.get('password', '')
+        
+        # Проверка наличия email и password
+        if not email or not password:
+            return Response({
+                'status': 'error',
+                'message': 'Please provide both email and password'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Поиск пользователя по email или username
+        user = User.objects.filter(Q(email=email) | Q(username=email)).first()
+        
         if not user:
-            raise AuthenticationFailed('User not found')
-
+            return Response({
+                'status': 'error',
+                'message': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Аутентификация пользователя
         if not user.check_password(password):
-            raise AuthenticationFailed('Invalid password')
-
-        payload = {
-            'id': user.id,
-            'exp': timezone.now() + datetime.timedelta(minutes=60),
-            'iat': timezone.now()
-        }
-
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-
-        response = Response()
-        response.set_cookie('token', value=token, httponly=True)
-        response.data = {
-            'token': token,
-            'userId': user.id,
-        }
-
-        return response
+            return Response({
+                'status': 'error',
+                'message': 'Invalid password'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Вход пользователя в систему
+        login(request, user)
+        
+        return Response({
+            'status': 'success',
+            'message': 'Login successful',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'username': user.username
+            }
+        })
 
 
 class UserView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            raise AuthenticationFailed('Unauthorized')
-
-        token = auth_header.split(' ')[1]
-        print(f"Received token: {token}")  # Логирование токена
-
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-            print(f"Decoded payload: {payload}")  # Логирование декодированного payload
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationFailed('Token expired')
-        except jwt.InvalidTokenError:
-            raise AuthenticationFailed('Invalid token')
-
-        user = User.objects.filter(id=payload['id']).first()
-        if not user:
-            raise AuthenticationFailed('User not found')
-
+        user = request.user
         serializer = UserSerializer(user)
         return Response(serializer.data)
 
+
 class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
-        response = Response()
-        response.delete_cookie('token')
-        response.data = {
-            'message': 'Logged out',
-        }
-        return response
+        logout(request)
+        return Response({
+            'status': 'success',
+            'message': 'Logged out successfully'
+        })
