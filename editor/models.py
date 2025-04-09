@@ -1,8 +1,15 @@
 from django.db import models
-from authentication.models import User
+from django.contrib.auth.models import User
 
+class File(models.Model):
+    name = models.CharField(max_length=255)
+    content = models.JSONField()
+    last_modified = models.DateTimeField(auto_now=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='files')
+    created_at = models.DateTimeField(auto_now_add=True)
 
-class BinaryDocument(models.Model):
-    user_id = models.ForeignKey(User, verbose_name='Пользователь', on_delete=models.CASCADE)
-    pdf_data = models.BinaryField()  # PDF хранится как бинарные данные
+    class Meta:
+        ordering = ['-last_modified']
 
+    def __str__(self):
+        return f"{self.name} - {self.user.username}" 

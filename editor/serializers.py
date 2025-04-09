@@ -1,7 +1,8 @@
 from rest_framework import serializers
-from editor.models import BinaryDocument
+from .models import File
 
-class BinaryDocumentSerializer(serializers.ModelSerializer):
+class FileSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BinaryDocument
-        fields = "__all__"
+        model = File
+        fields = ['id', 'name', 'content', 'last_modified', 'created_at']
+        read_only_fields = ['last_modified', 'created_at']
