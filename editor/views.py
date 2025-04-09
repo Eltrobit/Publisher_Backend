@@ -1,63 +1,134 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from .models import File
 from .serializers import FileSerializer
-from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q
+from rest_framework.permissions import AllowAny
+from django.contrib.auth.models import User
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
-class IsOwner(permissions.BasePermission):
+@method_decorator(csrf_exempt, name='dispatch')
+class FileViewSet(viewsets.ViewSet):
     """
-    Custom permission to only allow owners of an object to access it.
+    API для работы с файлами без аутентификации, используя ID пользователя
     """
-    def has_object_permission(self, request, view, obj):
-        # Check if the user is the owner of the file
-        return obj.user == request.user
-
-class FileViewSet(viewsets.ModelViewSet):
-    """
-    A viewset for viewing and editing file instances.
-    """
-    serializer_class = FileSerializer
-    permission_classes = [IsAuthenticated, IsOwner]
-
-    def get_queryset(self):
-        """
-        This view returns a list of all files
-        for the currently authenticated user.
-        """
-        user = self.request.user
-        return File.objects.filter(user=user).order_by('-updated_at')
+    permission_classes = [AllowAny]
     
-    def create(self, request, *args, **kwargs):
+    def list(self, request):
         """
-        Create a new file for the current user.
+        Получить все файлы (только для демонстрации)
         """
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(user=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        files = File.objects.all()
+        serializer = FileSerializer(files, many=True)
+        return Response(serializer.data)
     
-    def update(self, request, *args, **kwargs):
+    def retrieve(self, request, pk=None):
         """
-        Update a file if the current user is the owner.
+        Получить конкретный файл по ID
         """
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        if serializer.is_valid():
-            serializer.save()
+        file = get_object_or_404(File, id=pk)
+        serializer = FileSerializer(file)
+        return Response(serializer.data)
+    
+    def create(self, request):
+        """
+        Создать новый файл, с передачей ID пользователя в теле запроса
+        URL: /api/files/
+        """
+        try:
+            data = request.data
+            user_id = data.get('user')
+            
+            if not user_id:
+                return Response(
+                    {"error": "ID пользователя (user) обязателен"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                # Используем стандартную модель пользователя Django
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": f"Пользователь с ID {user_id} не найден"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Удаляем user из данных, так как он передается отдельно при сохранении
+            if 'user' in data:
+                data = data.copy()
+                data.pop('user')
+                
+            serializer = FileSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save(user=user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['GET'], url_path='user/(?P<user_id>[^/.]+)')
+    def user_files(self, request, user_id=None):
+        """
+        Получить все файлы пользователя по его ID
+        URL: /api/files/user/{user_id}/
+        """
+        try:
+            user = get_object_or_404(User, id=user_id)
+            files = File.objects.filter(user=user)
+            serializer = FileSerializer(files, many=True)
             return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
-    def destroy(self, request, *args, **kwargs):
+    @action(detail=False, methods=['POST'], url_path='user/(?P<user_id>[^/.]+)/create')
+    def create_file(self, request, user_id=None):
         """
-        Delete a file if the current user is the owner.
+        Создать файл для пользователя по его ID
+        URL: /api/files/user/{user_id}/create/
         """
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            user = get_object_or_404(User, id=user_id)
+            data = request.data
+            
+            serializer = FileSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save(user=user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['PUT'], url_path='update')
+    def update_file(self, request, pk=None):
+        """
+        Обновить файл по его ID
+        URL: /api/files/{file_id}/update/
+        """
+        try:
+            file = get_object_or_404(File, id=pk)
+            serializer = FileSerializer(file, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['DELETE'], url_path='delete')
+    def delete_file(self, request, pk=None):
+        """
+        Удалить файл по его ID
+        URL: /api/files/{file_id}/delete/
+        """
+        try:
+            file = get_object_or_404(File, id=pk)
+            file.delete()
+            return Response({"message": "File deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
